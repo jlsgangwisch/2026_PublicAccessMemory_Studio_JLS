@@ -145,7 +145,8 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([19, 18, 20, 255]));
+      // Fixed: 4 RGBA bytes matching rgb(19, 18, 20)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array());
       return tex;
     }
 
@@ -174,23 +175,31 @@
     });
     video.load();
 
-    // Switching state: starts with video (false) for 20 seconds
+    // Switching logic: start with video for 20s, then toggle every 30-120s
     let showingStream = false;
-    let nextSwitchTime = performance.now() + 20000; // Initial 20-second delay
 
-    function getRandomIntervalMs() {
-      // Random duration between 30,000 ms (30s) and 120,000 ms (120s)
-      return (30 + Math.random() * 90) * 1000;
+    function getRandomIntervalMs(minSec, maxSec) {
+      return (minSec + Math.random() * (maxSec - minSec)) * 1000;
     }
 
-    function render(now) {
-      // Check if it's time to switch between video and stream
-      if (now >= nextSwitchTime) {
+    function scheduleNextSwitch() {
+      const delayMs = getRandomIntervalMs(30, 120);
+      console.log(`Next switch in ${(delayMs / 1000).toFixed(1)}s`);
+      setTimeout(() => {
         showingStream = !showingStream;
-        nextSwitchTime = now + getRandomIntervalMs();
-      }
+        console.log("Switched to:", showingStream ? "Live Stream" : "Video");
+        scheduleNextSwitch();
+      }, delayMs);
+    }
 
-      // Only upload the texture that is currently visible to save CPU/GPU bandwidth
+    // Initial 20-second delay before switching to the live stream for the first time
+    setTimeout(() => {
+      showingStream = true;
+      console.log("Initial 20s elapsed -> Switched to: Live Stream");
+      scheduleNextSwitch();
+    }, 20000);
+
+    function render() {
       if (!showingStream) {
         if (video.readyState >= video.HAVE_CURRENT_DATA && video.videoWidth > 0) {
           gl.activeTexture(gl.TEXTURE0);
@@ -200,7 +209,8 @@
           } catch (e) {}
         }
       } else {
-        if (img.complete && img.naturalWidth > 0) {
+        // Removed img.complete check because infinite MJPEG streams keep complete=false
+        if (img.naturalWidth > 0) {
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, streamTex);
           try {
@@ -211,7 +221,7 @@
 
       const canvasAspect = canvas.width / canvas.height;
       const videoAspect = (video.videoWidth && video.videoHeight) ? (video.videoWidth / video.videoHeight) : canvasAspect;
-      const streamAspect = (img.naturalWidth && img.naturalHeight) ? (img.naturalWidth / img.naturalHeight) : canvasAspect;
+      const streamAspect = (img.naturalWidth && img.naturalHeight) ? (img.naturalWidth / img.naturalHeight) : videoAspect;
 
       gl.uniform1f(uShowStreamLoc, showingStream ? 1.0 : 0.0);
       gl.uniform1f(uCanvasAspectLoc, canvasAspect);
