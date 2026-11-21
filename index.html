@@ -26,14 +26,18 @@
       width: 100%;
       height: 100%;
       display: block;
+      z-index: 1;
     }
 
+    /* Keep inside the viewport behind the canvas so the browser actively decodes MJPEG frames */
     .hidden-source {
       position: fixed;
-      top: -9999px;
-      left: -9999px;
-      width: 320px;
-      height: 240px;
+      top: 0;
+      left: 0;
+      width: 16px;
+      height: 16px;
+      opacity: 0.01;
+      z-index: 0;
       pointer-events: none;
     }
   </style>
@@ -66,7 +70,7 @@
 
       uniform sampler2D u_videoTex;
       uniform sampler2D u_streamTex;
-      uniform float u_showStream; // 0.0 = video, 1.0 = stream
+      uniform float u_showStream;
       uniform float u_canvasAspect;
       uniform float u_videoAspect;
       uniform float u_streamAspect;
@@ -145,8 +149,9 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      // Fixed: 4 RGBA bytes matching rgb(19, 18, 20)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array());
+      // 4 explicit RGBA bytes: [R, G, B, A]
+      const pixel = new Uint8Array([19, 18, 20, 255]);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
       return tex;
     }
 
@@ -175,7 +180,6 @@
     });
     video.load();
 
-    // Switching logic: start with video for 20s, then toggle every 30-120s
     let showingStream = false;
 
     function getRandomIntervalMs(minSec, maxSec) {
@@ -192,7 +196,6 @@
       }, delayMs);
     }
 
-    // Initial 20-second delay before switching to the live stream for the first time
     setTimeout(() => {
       showingStream = true;
       console.log("Initial 20s elapsed -> Switched to: Live Stream");
@@ -209,7 +212,6 @@
           } catch (e) {}
         }
       } else {
-        // Removed img.complete check because infinite MJPEG streams keep complete=false
         if (img.naturalWidth > 0) {
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, streamTex);
