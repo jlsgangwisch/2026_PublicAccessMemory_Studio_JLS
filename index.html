@@ -1,10 +1,9 @@
-html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JLS Gangwisch 2026</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JLS Gangwisch</title>
   <style>
     * {
       margin: 0;
@@ -12,60 +11,29 @@ html
       box-sizing: border-box;
     }
 
-    html, body {
+    html,
+    body {
       width: 100%;
       height: 100%;
-      background-color: #000;
       overflow: hidden;
+      background-color: rgb(19, 18, 20);
     }
 
-    .stream-container {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
-    }
-
-    .stream {
-      position: absolute;
-      top: 0;
-      left: 0;
+    video {
+      position: fixed;
+      top: 50%;
+      left: 50%;
       width: 100%;
       height: 100%;
-      object-fit: cover; 
-      opacity: 0;
-      transition: opacity 0.5s ease-in-out;
-    }
-
-    .stream.active {
-      opacity: 1;
-      z-index: 1;
+      transform: translate(-50%, -50%);
+      object-fit: contain;
     }
   </style>
 </head>
 <body>
-
-  <div class="stream-container">
-    <img id="stream1" class="stream active" src="https://66.65.149.213:81/mjpg/video.mjpg" alt="Camera Stream 1">
-    <img id="stream2" class="stream" src="https://108.30.103.58:8082/mjpg/video.mjpg" alt="Camera Stream 2">
-	<img id="stream3" class="stream" src="https://108.41.24.124/mjpg/video.mjpg?timestamp=1794608099655" alt="Camera Stream 3">
-
-  </div>
-
-  <script>
-    const streams = [
-      document.getElementById('stream1'),
-      document.getElementById('stream2'),
-	document.getElementById('stream3')
-    ];
-
-    let currentIndex = 0;
-
-    setInterval(() => {
-      streams[currentIndex].classList.remove('active');
-      currentIndex = (currentIndex + 1) % streams.length;
-      streams[currentIndex].classList.add('active');
-    }, 7000);
-  </script>
-
+  <video autoplay loop muted playsinline title="this is a video of JLS Gangwisch looking at you.">
+    <source src="mov/jls.mp4" type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
 </body>
 </html>
