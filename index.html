@@ -42,7 +42,7 @@
   <canvas id="glcanvas"></canvas>
 
   <video id="bgVideo" class="hidden-source" src="mov/jls.mp4" autoplay loop muted playsinline></video>
-  <img id="streamImg" class="hidden-source" crossorigin="anonymous" src="https://stream0.jgang1.workers.dev/" alt="Live Stream" />
+  <img id="streamImg" class="hidden-source" crossorigin="anonymous" src="https://workers.dev" alt="Live Stream" />
 
   <script>
     const canvas = document.getElementById("glcanvas");
@@ -72,28 +72,44 @@
       uniform float u_streamAspect;
       uniform vec3 u_bgColor;
 
-      vec2 containUV(vec2 uv, float canvasAspect, float mediaAspect) {
+      // Calculates the exact rendered width & height of the video on screen
+      vec2 getVideoBoxScale(float canvasAspect, float videoAspect) {
         vec2 scale = vec2(1.0);
-        if (canvasAspect > mediaAspect) {
-          scale.x = mediaAspect / canvasAspect;
+        if (canvasAspect > videoAspect) {
+          scale.x = videoAspect / canvasAspect;
         } else {
-          scale.y = canvasAspect / mediaAspect;
+          scale.y = canvasAspect / videoAspect;
         }
-        return (uv - 0.5) / scale + 0.5;
-      }
-
-      vec4 sampleContain(sampler2D tex, vec2 uv, float canvasAspect, float mediaAspect) {
-        vec2 mappedUV = containUV(uv, canvasAspect, mediaAspect);
-        if (mappedUV.x < 0.0 || mappedUV.x > 1.0 || mappedUV.y < 0.0 || mappedUV.y > 1.0) {
-          return vec4(u_bgColor, 1.0);
-        }
-        return texture2D(tex, mappedUV);
+        return scale;
       }
 
       void main() {
-        vec4 vidColor = sampleContain(u_videoTex, v_uv, u_canvasAspect, u_videoAspect);
-        vec4 streamColor = sampleContain(u_streamTex, v_uv, u_canvasAspect, u_streamAspect);
-        gl_FragColor = mix(vidColor, streamColor, u_mix);
+        // 1. Fit the video inside the screen (object-fit: contain)
+        vec2 vidScale = getVideoBoxScale(u_canvasAspect, u_videoAspect);
+        vec2 vidUV = (v_uv - 0.5) / vidScale + 0.5;
+
+        bool insideVideo = (vidUV.x >= 0.0 && vidUV.x <= 1.0 && vidUV.y >= 0.0 && vidUV.y <= 1.0);
+        vec3 vidColor = insideVideo ? texture2D(u_videoTex, vidUV).rgb : u_bgColor;
+
+        // 2. Match the stream's rendered width to the video's exact rendered width
+        float targetWidth = vidScale.x;
+        // Calculate height from the stream's natural aspect ratio so it doesn't stretch
+        float targetHeight = targetWidth * (u_canvasAspect / u_streamAspect);
+        // If stream is taller than the video, clamp height to the video box so it stays clean
+        if (targetHeight > vidScale.y) {
+          targetHeight = vidScale.y;
+        }
+
+        vec2 streamScale = vec2(targetWidth, targetHeight);
+        vec2 streamUV = (v_uv - 0.5) / streamScale + 0.5;
+
+        bool insideStream = (streamUV.x >= 0.0 && streamUV.x <= 1.0 && streamUV.y >= 0.0 && streamUV.y <= 1.0);
+        vec3 streamColor = insideStream ? texture2D(u_streamTex, streamUV).rgb : vec3(0.0);
+
+        // 3. Additive blend: adds the stream light on top of the video
+        vec3 finalColor = vidColor + (streamColor * u_mix);
+
+        gl_FragColor = vec4(finalColor, 1.0);
       }
     `;
 
@@ -126,7 +142,6 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      // Fixed: 4 bytes (R, G, B, A) matching rgb(19, 18, 20)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([19, 18, 20, 255]));
       return tex;
     }
@@ -161,6 +176,10 @@
       return n * n * (3 - 2 * n);
     }
 
+    // --- TIMING & INTENSITY CONTROLS ---
+    const cycleSeconds = 40.0; // Total time for one full fade-in and fade-out cycle
+    const maxStreamGlow = 0.85; // Peak brightness of the additive stream (0.0 to 1.0)
+
     function render(timeMs) {
       const t = timeMs * 0.001;
 
@@ -180,12 +199,14 @@
         } catch (e) {}
       }
 
-      const cycle = (Math.sin(t * 0.5) + 1.0) * 0.5;
-      const mixAmount = smoothstep(0.15, 0.85, cycle);
+      // Slow sine wave (starts at 0 so video fades in first, then slowly fades stream in/out)
+      const angle = (t / cycleSeconds) * Math.PI * 2.0 - (Math.PI * 0.5);
+      const wave = (Math.sin(angle) + 1.0) * 0.5;
+      const mixAmount = smoothstep(0.1, 0.9, wave) * maxStreamGlow;
 
       const canvasAspect = canvas.width / canvas.height;
       const videoAspect = (video.videoWidth && video.videoHeight) ? (video.videoWidth / video.videoHeight) : canvasAspect;
-      const streamAspect = (img.naturalWidth && img.naturalHeight) ? (img.naturalWidth / img.naturalHeight) : canvasAspect;
+      const streamAspect = (img.naturalWidth && img.naturalHeight) ? (img.naturalWidth / img.naturalHeight) : videoAspect;
 
       gl.uniform1f(uMixLoc, mixAmount);
       gl.uniform1f(uCanvasAspectLoc, canvasAspect);
