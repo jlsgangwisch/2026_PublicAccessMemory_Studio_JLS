@@ -195,17 +195,88 @@ async function init() {
   const VIDEO_INDEX = TOTAL_STREAMS; // 7
   const TOTAL_INPUTS = TOTAL_STREAMS + 1; // 8 total inputs
 
+  // Per-camera polling intervals (ms) for cameras that serve static snapshots or stall
+  // Set to 0 for continuous MJPEG streams that don't need forced polling
+  const STREAM_POLL_INTERVALS = {
+    0: 15000, // mystic-river-mouth: reconnect every 15s if stalled
+    1: 15000, // nyc-trucks: reconnect every 15s if stalled
+    2: 15000, // nyc-exercise-bike: reconnect every 15s if stalled
+    3: 1000,  // nyc-roof-trees (nph-jpeg.cgi?0): poll every 1s for smooth snapshot updates
+    4: 15000, // nyc-street0: reconnect every 15s if stalled
+    5: 15000, // nyc-lobby0: reconnect every 15s if stalled
+    6: 15000  // nyc-beach: reconnect every 15s if stalled
+  };
+
   let currentInputIndex = -1;
   let showingStream = false;
   let switchTimer = null;
+  let pollTimer = null;
+  let isPollingInFlight = false;
+
+  // Off-screen preloader image so polling swaps frames seamlessly without black flashes
+  const preloaderImg = new Image();
+  preloaderImg.crossOrigin = "anonymous";
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    isPollingInFlight = false;
+    preloaderImg.onload = null;
+    preloaderImg.onerror = null;
+  }
+
+  function scheduleNextPoll(camIndex) {
+    const interval = STREAM_POLL_INTERVALS[camIndex] || 15000;
+    if (!interval || !showingStream || currentInputIndex !== camIndex) return;
+
+    pollTimer = setTimeout(() => {
+      if (!showingStream || currentInputIndex !== camIndex || isPollingInFlight) return;
+
+      isPollingInFlight = true;
+      const nextUrl = `${WORKER_BASE_URL}?cam=${camIndex}&t=${Date.now()}`;
+
+      preloaderImg.onload = () => {
+        isPollingInFlight = false;
+        if (showingStream && currentInputIndex === camIndex) {
+          img.src = nextUrl;
+          scheduleNextPoll(camIndex);
+        }
+      };
+
+      preloaderImg.onerror = () => {
+        isPollingInFlight = false;
+        if (showingStream && currentInputIndex === camIndex) {
+          scheduleNextPoll(camIndex);
+        }
+      };
+
+      preloaderImg.src = nextUrl;
+    }, interval);
+  }
+
+  // Also recover immediately if the active stream connection drops or errors out
+  img.addEventListener("error", () => {
+    if (showingStream && currentInputIndex >= 0 && currentInputIndex < TOTAL_STREAMS) {
+      stopPolling();
+      setTimeout(() => {
+        if (showingStream && currentInputIndex >= 0 && currentInputIndex < TOTAL_STREAMS) {
+          img.src = `${WORKER_BASE_URL}?cam=${currentInputIndex}&t=${Date.now()}`;
+          scheduleNextPoll(currentInputIndex);
+        }
+      }, 1500);
+    }
+  });
 
   function getRandomIntervalMs(minSec, maxSec) {
     return (minSec + Math.random() * (maxSec - minSec)) * 1000;
   }
 
   function switchInput(forcedIndex = null) {
-    let nextIndex = forcedIndex;
+    stopPolling();
 
+    let nextIndex = forcedIndex;
     if (nextIndex === null) {
       nextIndex = currentInputIndex;
       while (nextIndex === currentInputIndex) {
@@ -216,14 +287,15 @@ async function init() {
     currentInputIndex = nextIndex;
 
     if (currentInputIndex === VIDEO_INDEX) {
-      // Switch to local video & drop any active MJPEG stream connection
+      // Switch to local video & drop any active stream connection
       showingStream = false;
       img.removeAttribute("src");
       ensureVideoPlaying();
     } else {
-      // Switch to one of the 7 Worker streams
+      // Switch to one of the 7 Worker streams & start its auto-refresh polling
       showingStream = true;
       img.src = `${WORKER_BASE_URL}?cam=${currentInputIndex}&t=${Date.now()}`;
+      scheduleNextPoll(currentInputIndex);
     }
 
     // Stay on this input for a random 40–260 seconds unless clicked
